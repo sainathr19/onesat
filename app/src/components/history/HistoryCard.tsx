@@ -1,16 +1,12 @@
 "use client";
 
-import React, { useEffect, useMemo, useState, useContext } from "react";
-import { useWallet } from "@/store/useWallet";
+import React from "react";
 import { VesuHistoryResponse } from "@/types/vesu";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
 import { PROJECTS } from "@/types/earn";
-import { ChainDataContext } from "@/app/context/ChainDataContext";
-import { BitcoinNetwork, SwapperFactory } from "@atomiqlabs/sdk";
-import { RpcProviderWithRetries, StarknetInitializer, StarknetInitializerType } from "@atomiqlabs/chain-starknet";
 
 interface HistoryCardProps {
   data: VesuHistoryResponse;
@@ -32,12 +28,18 @@ const EXPLORERS = {
 
 const HistoryCard: React.FC<HistoryCardProps> = ({ data, className, onClick, effectiveStatus: propEffectiveStatus }) => {
   const isExpired = () => {
-    if (!data.status || data.status !== "created") return false;
+    // If parent already determined it's expired, use that
+    if (propEffectiveStatus === "expired") return true;
+
+    // Otherwise check locally (fallback)
+    if (!propEffectiveStatus || propEffectiveStatus !== "created") return false;
     if (!data.created_at) return false;
+    // Only expire if there's no BTC tx hash (truly created, not initiated)
+    if (data.btc_tx_hash) return false;
     const now = new Date();
     const createdAt = new Date(data.created_at);
-    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    return createdAt < twentyFourHoursAgo;
+    const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000); // 2 hours
+    return createdAt < twoHoursAgo;
   };
 
   const expired = isExpired();
@@ -70,70 +72,8 @@ const HistoryCard: React.FC<HistoryCardProps> = ({ data, className, onClick, eff
   };
 
 
-  // Read local pending deposits to detect BTC tx presence for this deposit
-  const { pendingDeposits } = useWallet();
-  const matchingPending = useMemo(() => (
-    Array.isArray(pendingDeposits)
-      ? pendingDeposits.find((d) => d.depositId === data.deposit_id)
-      : undefined
-  ), [pendingDeposits, data.deposit_id]);
-  const chainData = useContext(ChainDataContext);
-  const [btcTxIdLocal, setBtcTxIdLocal] = useState<string | null>(null);
-  const [isSwapperInitialized, setIsSwapperInitialized] = useState(false);
-
-  // Initialize minimal swapper for deriving BTC tx when not present in store
-  const factory = useMemo(
-    () => new SwapperFactory<[StarknetInitializerType]>([StarknetInitializer]),
-    []
-  );
-  const swapper = useMemo(() => {
-    const rpc =
-      chainData?.STARKNET?.swapperOptions?.rpcUrl ||
-      new RpcProviderWithRetries({ nodeUrl: "https://starknet-sepolia.public.blastapi.io/rpc/v0_8" });
-    return factory.newSwapper({
-      chains: { STARKNET: { rpcUrl: rpc } },
-      bitcoinNetwork: BitcoinNetwork.TESTNET4,
-    });
-  }, [factory, chainData]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!data.atomiq_swap_id || matchingPending?.depositTxHash) return;
-      try {
-        await swapper.init();
-        if (!cancelled) setIsSwapperInitialized(true);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const swap: any = await swapper.getSwapById(data.atomiq_swap_id);
-        if (!swap) return;
-        const methods = [
-          "getInputTransactionId",
-          "getInputTxId",
-          "getSrcTxId",
-          "getBitcoinTxId",
-        ];
-        for (const m of methods) {
-          if (typeof swap[m] === "function") {
-            const v = await swap[m]();
-            if (typeof v === "string" && /^[a-f0-9]{64}$/i.test(v)) {
-              if (!cancelled) setBtcTxIdLocal(v);
-              break;
-            }
-          }
-        }
-      } catch {
-        // ignore
-      } finally {
-        void swapper.stop();
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [data.atomiq_swap_id, matchingPending?.depositTxHash, swapper]);
-
-  const btcTxId = matchingPending?.depositTxHash || btcTxIdLocal || null;
-  const hasBtcTxForThisDeposit = Boolean(btcTxId);
+  // BTC transaction hash comes from backend now (used in render below)
+  const btcTxId = data.btc_tx_hash;
 
   // Compute effective status for display based on available data
   const effectiveStatus = (() => {
@@ -141,10 +81,7 @@ const HistoryCard: React.FC<HistoryCardProps> = ({ data, className, onClick, eff
     if (propEffectiveStatus) return propEffectiveStatus;
 
     if (expired) return "expired";
-    // If backend still says created but we observed a BTC tx locally, show initiated
-    if (data.status === "created" && hasBtcTxForThisDeposit) return "initiated";
-    // If swapper is not yet initialized and status is created, show "checking" state
-    if (data.status === "created" && !isSwapperInitialized && !matchingPending?.depositTxHash) return "checking";
+    // Backend btc_tx_hash takes precedence
     return data.status || "unknown";
   })();
 
@@ -174,8 +111,8 @@ const HistoryCard: React.FC<HistoryCardProps> = ({ data, className, onClick, eff
     return s.charAt(0).toUpperCase() + s.slice(1);
   };
 
-  // Button is always shown but disabled for expired transactions or when swapper not initialized
-  const isButtonDisabled = expired || !data.status || !onClick || !isSwapperInitialized;
+  // Button is disabled only for expired transactions
+  const isButtonDisabled = expired;
 
   // Utility for links and fallback
   const renderLinkedOrRaw = (
@@ -278,7 +215,7 @@ const HistoryCard: React.FC<HistoryCardProps> = ({ data, className, onClick, eff
               )
             ) : (
               <div className="font-mono text-xs xs:text-sm font-medium text-gray-500">
-                Pending
+                {expired ? "Cancelled" : "Pending"}
               </div>
             )}
             <div className="font-mono text-xs text-gray-600">
@@ -334,7 +271,7 @@ const HistoryCard: React.FC<HistoryCardProps> = ({ data, className, onClick, eff
               <div className="font-mono text-xs text-gray-600">Amount</div>
             </div>
             <Button
-              variant="primary"
+              variant={isButtonDisabled ? "disabled" : "primary"}
               size="sm"
               disabled={isButtonDisabled}
               onClick={handleStatusClick}
@@ -364,7 +301,7 @@ const HistoryCard: React.FC<HistoryCardProps> = ({ data, className, onClick, eff
                 )
               ) : (
                 <div className="font-mono text-xs xs:text-sm font-medium text-gray-500">
-                  Pending
+                  {expired ? "Cancelled" : "Pending"}
                 </div>
               )}
               <div className="font-mono text-xs text-gray-600">
@@ -423,7 +360,7 @@ const HistoryCard: React.FC<HistoryCardProps> = ({ data, className, onClick, eff
                 <div className="font-mono text-xs text-gray-600">Amount</div>
               </div>
               <Button
-                variant="primary"
+                variant={isButtonDisabled ? "disabled" : "primary"}
                 size="sm"
                 disabled={isButtonDisabled}
                 onClick={handleStatusClick}

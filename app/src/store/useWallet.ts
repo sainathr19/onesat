@@ -432,7 +432,7 @@ export const useWallet = create<WalletState>()(
             const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
             // Filter for deposits created in the last 24 hours with status "created"
-            const mapped = response
+            const pendingDeposits = response
               .filter((deposit: any) => {
                 const createdAt = new Date(deposit.created_at);
                 return (
@@ -443,31 +443,19 @@ export const useWallet = create<WalletState>()(
               .map((deposit: any) => ({
                 depositId: deposit.deposit_id,
                 swapId: deposit.atomiq_swap_id,
-                poolId: deposit.target_address, // Using target_address as poolId
-                selectedAsset: null, // Will need to be populated from pool data if needed
+                poolId: deposit.target_address,
+                selectedAsset: null,
                 createdAt: deposit.created_at,
                 status: deposit.status,
                 depositAddress: deposit.deposit_address,
                 amount: deposit.amount,
                 token: deposit.token,
                 targetAddress: deposit.target_address,
-                // IMPORTANT: server's deposit_tx_hash is Starknet tx. Preserve any existing BTC tx hash we may have stored earlier.
-                depositTxHash: null,
+                depositTxHash: deposit.btc_tx_hash, // Now from backend
                 atomiqSwapId: deposit.atomiq_swap_id,
               }));
 
-            // Merge with existing to preserve client-side fields like BTC depositTxHash
-            const existing = get().pendingDeposits || [];
-            const merged = mapped.map((n: any) => {
-              const prev = existing.find((p) => p.depositId === n.depositId);
-              return {
-                ...n,
-                depositTxHash: prev?.depositTxHash ?? n.depositTxHash,
-                atomiqSwapId: n.atomiqSwapId ?? prev?.atomiqSwapId ?? n.swapId ?? prev?.swapId ?? null,
-              };
-            });
-
-            set({ pendingDeposits: merged });
+            set({ pendingDeposits });
           }
         } catch (error) {
           console.error("Failed to fetch pending deposits:", error);

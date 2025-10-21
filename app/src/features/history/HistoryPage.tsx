@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useContext } from "react";
+import React, { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { useWallet } from "@/store/useWallet";
 import { useVesuHistory } from "@/hooks/useVesuHistory";
@@ -11,76 +11,45 @@ import HistoryCardSkeleton from "@/components/skeletons/HistoryCardSkeleton";
 import { DepositStatus } from "@/components/history/DepositStatus";
 import { VesuHistoryResponse } from "@/types/vesu";
 import { depositAPI } from "@/lib/api";
-import { ChainDataContext } from "@/app/context/ChainDataContext";
-import { BitcoinNetwork, SwapperFactory } from "@atomiqlabs/sdk";
-import { RpcProviderWithRetries, StarknetInitializer, StarknetInitializerType } from "@atomiqlabs/chain-starknet";
+import Pagination from "@/components/earn/Pagination";
 
 interface HistoryPageProps {
   className?: string;
 }
 
 const HistoryPage: React.FC<HistoryPageProps> = ({ className }) => {
-  const { connected, starknetAddress, connect, pendingDeposits, fetchPendingDeposits } = useWallet();
-  const chainData = useContext(ChainDataContext);
+  const { connected, starknetAddress, connect } = useWallet();
   const { history, loading: historyLoading } = useVesuHistory(starknetAddress);
   const [selectedDeposit, setSelectedDeposit] = useState<VesuHistoryResponse | null>(null);
   const [isStatusOpen, setIsStatusOpen] = useState(false);
   const [swapState, setSwapState] = useState<number>(0);
-  const [depositStatus, setDepositStatus] = useState<string | null>(null);
-  const [isSwapperInitialized, setIsSwapperInitialized] = useState(false);
   const [selectedCardStatus, setSelectedCardStatus] = useState<string>("created");
 
-  // Cache BTC tx and confirmation data per deposit ID to avoid repeated API calls
-  const [btcDataCache, setBtcDataCache] = useState<Record<string, { txId: string | null; confirmations: number; lastChecked: number }>>({});
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
 
-  // Initialize Atomiq swapper (SDK) for retrieving swaps by id
-  const factory = useMemo(
-    () => new SwapperFactory<[StarknetInitializerType]>([StarknetInitializer]),
-    []
-  );
-  const swapper = useMemo(() => {
-    const rpc =
-      chainData?.STARKNET?.swapperOptions?.rpcUrl ||
-      new RpcProviderWithRetries({
-        nodeUrl: "https://starknet-sepolia.public.blastapi.io/rpc/v0_8",
-      });
-    return factory.newSwapper({
-      chains: { STARKNET: { rpcUrl: rpc } },
-      bitcoinNetwork: BitcoinNetwork.TESTNET4,
-    });
-  }, [factory, chainData]);
+  // Track BTC confirmations for each deposit
+  const [confirmationsMap, setConfirmationsMap] = useState<Record<string, number>>({});
 
+  // Reset pagination when history changes
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        await swapper.init();
-        if (!cancelled) setIsSwapperInitialized(true);
-      } catch { }
-    })();
-    return () => {
-      cancelled = true;
-      void swapper.stop();
-    };
-  }, [swapper]);
+    setCurrentPage(1);
+  }, [history]);
 
-  // Keep store's pendingDeposits fresh so we can use it as a fallback
+  // Poll BTC confirmations for specific deposits that need it
   useEffect(() => {
-    if (!starknetAddress) return;
-    void fetchPendingDeposits();
-    const interval = setInterval(fetchPendingDeposits, 15000);
-    return () => clearInterval(interval);
-  }, [starknetAddress, fetchPendingDeposits]);
-
-  // Background job: populate BTC data cache for all non-deposited deposits
-  useEffect(() => {
-    if (!history || history.length === 0 || !isSwapperInitialized) return;
+    if (!history || history.length === 0) return;
 
     const getBtcConfirmations = async (txid: string): Promise<number> => {
       try {
         const txResp = await fetch(`/api/mempool/testnet4/api/tx/${txid}`, { cache: "no-store" });
         if (!txResp.ok) return 0;
         const tx = await txResp.json();
+
+        // Check if transaction is confirmed
+        if (!tx.status?.confirmed) return 0;
+
         const blockHeight: number | undefined = tx?.status?.block_height;
         if (!blockHeight) return 0;
 
@@ -96,113 +65,42 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ className }) => {
       }
     };
 
-    const tryFetchSwapBtcTx = async (swapId: string): Promise<string | null> => {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const swap: any = await swapper.getSwapById(swapId);
-        if (!swap) return null;
-
-        const methodCandidates = [
-          "getInputTransactionId",
-          "getInputTxId",
-          "getSrcTxId",
-          "getBitcoinTxId",
-        ];
-        for (const m of methodCandidates) {
-          if (typeof swap[m] === "function") {
-            const v = await swap[m]();
-            if (typeof v === "string" && /^[a-f0-9]{64}$/i.test(v)) return v;
-          }
-        }
-        return null;
-      } catch {
-        return null;
-      }
-    };
-
-    const updateCache = async () => {
-      const now = Date.now();
-      const CACHE_TTL = 10000; // Only refresh every 10 seconds
-
-      // Fetch tip height once for all confirmations
-      let tipHeight: number | null = null;
-
+    const pollConfirmations = async () => {
       for (const deposit of history) {
-        // Skip if deposited (no need to poll anymore)
+        // Only poll for deposits that:
+        // 1. Are not expired (not checking expiration here, just status)
+        // 2. Are not deposited (backend handles this)
+        // 3. Have a BTC tx hash
         if (deposit.status === "deposited") continue;
+        if (!deposit.btc_tx_hash) continue;
 
-        // Skip if recently checked
-        const cached = btcDataCache[deposit.deposit_id];
-        if (cached && now - cached.lastChecked < CACHE_TTL) continue;
+        try {
+          const confirmations = await getBtcConfirmations(deposit.btc_tx_hash);
 
-        // Try to find BTC tx
-        let btcTxId: string | null = cached?.txId || null;
-
-        // Check pending deposits store
-        if (!btcTxId) {
-          const matchingPending = pendingDeposits?.find?.(d => d.depositId === deposit.deposit_id);
-          btcTxId = matchingPending?.depositTxHash || null;
-        }
-
-        // Check via Atomiq SDK
-        if (!btcTxId && deposit.atomiq_swap_id) {
-          btcTxId = await tryFetchSwapBtcTx(deposit.atomiq_swap_id);
-        }
-
-        // Get confirmations if we have txId
-        let confirmations = 0;
-        if (btcTxId) {
-          try {
-            // Fetch tip height only once
-            if (tipHeight === null) {
-              const tipResp = await fetch(`/api/mempool/testnet4/api/blocks/tip/height`, { cache: "no-store" });
-              if (tipResp.ok) {
-                const tipText = await tipResp.text();
-                tipHeight = Number(tipText);
-              }
-            }
-
-            if (tipHeight && !Number.isNaN(tipHeight)) {
-              const txResp = await fetch(`/api/mempool/testnet4/api/tx/${btcTxId}`, { cache: "no-store" });
-              if (txResp.ok) {
-                const tx = await txResp.json();
-                const blockHeight: number | undefined = tx?.status?.block_height;
-                if (blockHeight) {
-                  confirmations = Math.max(0, tipHeight - blockHeight + 1);
-                }
-              }
-            }
-          } catch {
-            // ignore
-          }
-        }
-
-        // Update cache only if values changed
-        const needsUpdate =
-          !cached ||
-          cached.txId !== btcTxId ||
-          cached.confirmations !== confirmations;
-
-        if (needsUpdate) {
-
-          setBtcDataCache(prev => ({
+          // Update confirmations map
+          setConfirmationsMap(prev => ({
             ...prev,
-            [deposit.deposit_id]: {
-              txId: btcTxId,
-              confirmations,
-              lastChecked: now,
-            }
+            [deposit.deposit_id]: confirmations
           }));
+
+          // If we have 2+ confirmations, update the backend status
+          if (confirmations >= 2 && deposit.status === "created") {
+            // We could update backend here if needed, but for now just let the UI reflect it
+            console.log(`Deposit ${deposit.deposit_id} has ${confirmations} confirmations`);
+          }
+        } catch (error) {
+          console.error(`Failed to check confirmations for ${deposit.deposit_id}:`, error);
         }
       }
     };
 
-    // Run immediately and every 10 seconds
-    updateCache();
-    const interval = setInterval(updateCache, 10000);
+    // Poll every 30 seconds for BTC confirmations
+    pollConfirmations();
+    const interval = setInterval(pollConfirmations, 10000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history, isSwapperInitialized, pendingDeposits, swapper]);
+  }, [history]);
+
 
   // Poll deposit status when a deposit is selected
   useEffect(() => {
@@ -212,28 +110,26 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ className }) => {
       try {
         const result = await depositAPI.getDeposit(selectedDeposit.deposit_id);
 
-        // Get data from cache
-        const cached = btcDataCache[selectedDeposit.deposit_id];
-        const btcTxId = cached?.txId || null;
-        const confs = cached?.confirmations || 0;
+        // Get BTC tx hash from backend
+        const btcTxId = result.btc_tx_hash || null;
+        const confirmations = confirmationsMap[selectedDeposit.deposit_id] || 0;
 
-        // Determine status based on backend + cache
+        // Determine status based on backend data + confirmations
         let effectiveStatus = result.status;
         if (result.status === "deposited") {
           effectiveStatus = "deposited";
-        } else if (confs >= 2) {
+        } else if (confirmations >= 2) {
           effectiveStatus = "redeemed";
         } else if (btcTxId) {
           effectiveStatus = "initiated";
         }
 
-        setDepositStatus(effectiveStatus);
         setSelectedCardStatus(effectiveStatus);
 
         // Update swap state for progress bar
         if (effectiveStatus === "deposited") {
           setSwapState(3);
-        } else if (confs >= 2) {
+        } else if (confirmations >= 2) {
           setSwapState(2);
         } else if (btcTxId) {
           setSwapState(1);
@@ -252,23 +148,16 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ className }) => {
     const interval = setInterval(pollDepositStatus, 5000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDeposit, isStatusOpen, btcDataCache]);
+  }, [selectedDeposit, isStatusOpen, confirmationsMap]);
 
   const handleCardClick = (deposit: VesuHistoryResponse) => {
     setSelectedDeposit(deposit);
-    setDepositStatus(deposit.status);
     setIsStatusOpen(true);
 
-    // Determine the card's effective status from cache (no async calls here!)
-    const matchingPending = pendingDeposits?.find?.(
-      (d) => d.depositId === deposit.deposit_id
-    );
-    const cached = btcDataCache[deposit.deposit_id];
-    const hasBtcTxInStore = Boolean(matchingPending?.depositTxHash);
-    const hasBtcTxInCache = Boolean(cached?.txId);
-    const hasBtcTx = hasBtcTxInStore || hasBtcTxInCache;
-    const btcConfirmations = cached?.confirmations || 0;
-    const hasBtcConfirmations = btcConfirmations >= 2;
+    // Determine the card's effective status from backend data + confirmations
+    const hasBtcTx = Boolean(deposit.btc_tx_hash);
+    const confirmations = confirmationsMap[deposit.deposit_id] || 0;
+    const hasBtcConfirmations = confirmations >= 2;
 
     let cardStatus = "created";
     if (deposit.status === "deposited") {
@@ -281,10 +170,9 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ className }) => {
       cardStatus = "created";
     }
 
-
     setSelectedCardStatus(cardStatus);
 
-    // Initialize swap state based on deposit data and cache
+    // Initialize swap state based on deposit data + confirmations
     if (deposit.status === "deposited") {
       setSwapState(3);
     } else if (hasBtcConfirmations) {
@@ -360,12 +248,33 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ className }) => {
 
   const summaryStats = calculateSummaryStats();
 
+  // Pagination logic
+  const totalPages = Math.ceil((history?.length || 0) / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const currentItems = history?.slice(startIndex, endIndex) || [];
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    // Scroll to top when page changes
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // Helper to compute effective status for a deposit
   const getEffectiveStatus = (deposit: VesuHistoryResponse): string => {
-    const cached = btcDataCache[deposit.deposit_id];
-    const matchingPending = pendingDeposits?.find?.(d => d.depositId === deposit.deposit_id);
-    const hasBtcTx = Boolean(cached?.txId || matchingPending?.depositTxHash);
-    const confirmations = cached?.confirmations || 0;
+    // Check if expired first (2 hours for created status with NO BTC tx hash)
+    if (deposit.status === "created" && deposit.created_at && !deposit.btc_tx_hash) {
+      const now = new Date();
+      const createdAt = new Date(deposit.created_at);
+      const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000); // 2 hours
+      if (createdAt < twoHoursAgo) {
+        return "expired";
+      }
+    }
+
+    // BTC tx hash from backend
+    const hasBtcTx = Boolean(deposit.btc_tx_hash);
+    const confirmations = confirmationsMap[deposit.deposit_id] || 0;
 
     const effectiveStatus = (() => {
       if (deposit.status === "deposited") return "deposited";
@@ -373,7 +282,6 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ className }) => {
       if (hasBtcTx) return "initiated";
       return "created";
     })();
-
 
     return effectiveStatus;
   };
@@ -434,9 +342,9 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ className }) => {
           </div>
         ) : history && history.length > 0 ? (
           <div className="space-y-3 xs:space-y-4">
-            {history.map((transaction, index) => (
+            {currentItems.map((transaction, index) => (
               <HistoryCard
-                key={index}
+                key={transaction.deposit_id}
                 data={transaction}
                 onClick={() => handleCardClick(transaction)}
                 effectiveStatus={getEffectiveStatus(transaction)}
@@ -450,6 +358,15 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ className }) => {
             </p>
           </Card>
         )}
+
+        {/* Pagination */}
+        {history && history.length > 0 && totalPages > 1 && (
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+          />
+        )}
       </div>
 
       <DepositStatus
@@ -458,7 +375,7 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ className }) => {
         swapState={swapState}
         depositStatus={selectedCardStatus}
         selectedAsset={selectedDeposit ? { symbol: "Asset" } : null}
-        isInitializing={!isSwapperInitialized}
+        isInitializing={false}
         isSwapping={false}
       />
     </div>
