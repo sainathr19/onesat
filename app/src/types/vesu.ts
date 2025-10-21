@@ -89,6 +89,7 @@ export interface VesuHistoryResponse {
   status: "created" | "initiated" | "deposited";
   created_at: string;
   deposit_tx_hash: string | null;
+  btc_tx_hash: string | null;
   atomiq_swap_id: string | null;
 }
 

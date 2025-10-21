@@ -182,6 +182,8 @@ pub struct DepositResponse {
     pub created_at: chrono::DateTime<chrono::Utc>,
     /// Transaction hash of the deposit
     pub deposit_tx_hash: Option<String>,
+    /// Bitcoin transaction hash
+    pub btc_tx_hash: Option<String>,
     /// Atomiq swap id
     pub atomiq_swap_id: Option<String>,
 }

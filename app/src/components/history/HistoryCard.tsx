@@ -271,15 +271,18 @@ const HistoryCard: React.FC<HistoryCardProps> = ({ data, className, onClick, eff
           </div>
 
           <div className="space-y-1">
-            {btcTxId ? (
-              renderLinkedOrRaw(btcTxId, EXPLORERS.bitcoin.tx)
+            {data.deposit_tx_hash ? (
+              renderLinkedOrRaw(
+                data.deposit_tx_hash,
+                explorerForTxHash(data.deposit_tx_hash)
+              )
             ) : (
               <div className="font-mono text-xs xs:text-sm font-medium text-gray-500">
                 Pending
               </div>
             )}
             <div className="font-mono text-xs text-gray-600">
-              BTC Tx Hash
+              Deposit Txn Hash
             </div>
           </div>
 
@@ -354,15 +357,18 @@ const HistoryCard: React.FC<HistoryCardProps> = ({ data, className, onClick, eff
             </div>
 
             <div className="space-y-1">
-              {btcTxId ? (
-                renderLinkedOrRaw(btcTxId, EXPLORERS.bitcoin.tx)
+              {data.deposit_tx_hash ? (
+                renderLinkedOrRaw(
+                  data.deposit_tx_hash,
+                  explorerForTxHash(data.deposit_tx_hash)
+                )
               ) : (
                 <div className="font-mono text-xs xs:text-sm font-medium text-gray-500">
                   Pending
                 </div>
               )}
               <div className="font-mono text-xs text-gray-600">
-                BTC Tx Hash
+                Deposit Txn Hash
               </div>
             </div>
 

@@ -56,9 +56,9 @@ impl OrderbookProvider {
             INSERT INTO deposits (
                 deposit_id, user_address, action, amount, 
                 token, target_address, deposit_address, status,
-                created_at, deposit_tx_hash, atomiq_swap_id
+                created_at, deposit_tx_hash, btc_tx_hash, atomiq_swap_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING 
                 deposit_id,
                 user_address,
@@ -70,6 +70,7 @@ impl OrderbookProvider {
                 status,
                 created_at,
                 deposit_tx_hash,
+                btc_tx_hash,
                 atomiq_swap_id
             "#,
         )
@@ -83,6 +84,7 @@ impl OrderbookProvider {
         .bind("created")
         .bind(created_at)
         .bind(deposit_tx_hash)
+        .bind(None::<String>) // btc_tx_hash initially null
         .bind(atomiq_swap_id)
         .fetch_one(&self.pool)
         .await?;
@@ -111,6 +113,7 @@ impl OrderbookProvider {
                 status,
                 created_at,
                 deposit_tx_hash,
+                btc_tx_hash,
                 atomiq_swap_id
             FROM deposits
             WHERE deposit_id = $1
@@ -144,6 +147,7 @@ impl OrderbookProvider {
                 status,
                 created_at,
                 deposit_tx_hash,
+                btc_tx_hash,
                 atomiq_swap_id
             FROM deposits
             WHERE status = $1
@@ -174,6 +178,7 @@ impl OrderbookProvider {
                 status,
                 created_at,
                 deposit_tx_hash,
+                btc_tx_hash,
                 atomiq_swap_id
             FROM deposits
             WHERE user_address = $1
@@ -208,6 +213,30 @@ impl OrderbookProvider {
                 "#,
         )
         .bind(atomiq_swap_id)
+        .bind(deposit_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Updates the BTC transaction hash for a deposit
+    ///
+    /// # Arguments
+    /// * `deposit_id` - The deposit ID to update
+    /// * `btc_tx_hash` - The Bitcoin transaction hash to set
+    ///
+    /// # Returns
+    /// Result indicating success or failure
+    pub async fn update_btc_tx_hash(&self, deposit_id: &str, btc_tx_hash: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+                UPDATE deposits
+                SET btc_tx_hash = $1
+                WHERE deposit_id = $2
+                "#,
+        )
+        .bind(btc_tx_hash)
         .bind(deposit_id)
         .execute(&self.pool)
         .await?;
