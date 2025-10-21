@@ -346,3 +346,36 @@ pub async fn update_atomiq_swap_id(
         })?;
     Ok(Response::ok(()))
 }
+
+#[derive(Deserialize)]
+pub struct UpdateBtcTxHashRequest {
+    pub btc_tx_hash: String,
+}
+
+/// Updates the BTC transaction hash for a deposit
+///
+/// # Path Parameters
+/// * `deposit_id` - The deposit ID
+///
+/// # Returns
+/// Result indicating success or failure
+///
+/// # Request Body
+/// * `btc_tx_hash` - The Bitcoin transaction hash to set
+pub async fn update_btc_tx_hash(
+    State(state): State<Arc<HandlerState>>,
+    Path(deposit_id): Path<String>,
+    Json(request): Json<UpdateBtcTxHashRequest>,
+) -> ApiResult<()> {
+    state
+        .orderbook
+        .update_btc_tx_hash(&deposit_id, &request.btc_tx_hash)
+        .await
+        .map_err(|e| {
+            Response::error(
+                format!("Database error: {}", e),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        })?;
+    Ok(Response::ok(()))
+}

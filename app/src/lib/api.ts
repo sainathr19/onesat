@@ -148,6 +148,31 @@ export const depositAPI = {
   },
 
   /**
+   * Update BTC transaction hash for a deposit
+   */
+  updateBtcTxHash: async (depositId: string, btcTxHash: string) => {
+    const response = await fetch(`${API_BASE_URL}/deposit/${depositId}/btc-tx-hash`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ btc_tx_hash: btcTxHash }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to update BTC tx hash");
+    }
+
+    const data: ApiResponse<any> = await response.json();
+
+    if (data.status === "Error") {
+      throw new Error(data.error || "Failed to update BTC tx hash");
+    }
+
+    return data.result;
+  },
+
+  /**
    * Get deposit by ID
    */
   getDeposit: async (depositId: string) => {

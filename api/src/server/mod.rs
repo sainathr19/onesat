@@ -15,8 +15,8 @@ use crate::{
     registry::VaultRegistry,
     server::handler::{
         HandlerState, create_deposit, get_created_deposits, get_deposit, get_health,
-        get_user_deposits, supported_assets, update_atomiq_swap_id, vesu_history, vesu_pools,
-        vesu_positions,
+        get_user_deposits, supported_assets, update_atomiq_swap_id, update_btc_tx_hash,
+        vesu_history, vesu_pools, vesu_positions,
     },
 };
 
@@ -66,6 +66,7 @@ impl Server {
                 "/deposit/:deposit_id/atomiq-swap-id",
                 post(update_atomiq_swap_id),
             )
+            .route("/deposit/:deposit_id/btc-tx-hash", post(update_btc_tx_hash))
             .nest(
                 "/vesu",
                 Router::new()
