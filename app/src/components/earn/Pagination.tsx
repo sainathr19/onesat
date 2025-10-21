@@ -51,7 +51,7 @@ const Pagination: React.FC<PaginationProps> = ({
                 <Card
                     onClick={() => onPageChange(currentPage - 1)}
                     disabled={currentPage === 1}
-                    className="px-2 xs:px-3 py-1 xs:py-2 text-xs xs:text-sm font-mono"
+                    className={cn("px-2 xs:px-3 py-1 xs:py-2 text-xs xs:text-sm font-mono", !(currentPage === 1) && "cursor-pointer")}
                 >
                     <span className="hidden xs:inline">Previous</span>
                     <span className="xs:hidden">Prev</span>
@@ -65,7 +65,7 @@ const Pagination: React.FC<PaginationProps> = ({
                             <Card
                                 onClick={() => onPageChange(page as number)}
                                 isActive={currentPage === page}
-                                className="px-2 xs:px-3 py-1 xs:py-2 text-xs xs:text-sm font-mono"
+                                className={cn("px-2 xs:px-3 py-1 xs:py-2 text-xs xs:text-sm font-mono", !(currentPage === page) && "cursor-pointer")}
                             >
                                 {page}
                             </Card>
@@ -76,7 +76,7 @@ const Pagination: React.FC<PaginationProps> = ({
                 <Card
                     onClick={() => onPageChange(currentPage + 1)}
                     disabled={currentPage === totalPages}
-                    className="px-2 xs:px-3 py-1 xs:py-2 text-xs xs:text-sm font-mono"
+                    className={cn("px-2 xs:px-3 py-1 xs:py-2 text-xs xs:text-sm font-mono", !(currentPage === totalPages) && "cursor-pointer")}
                 >
                     Next
                 </Card>

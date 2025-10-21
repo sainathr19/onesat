@@ -36,7 +36,7 @@ const Button: React.FC<ButtonProps> = ({
   }, []);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!buttonRef.current || !containerRef.current || isPressed || isMobile || !willHover)
+    if (!buttonRef.current || !containerRef.current || isPressed || isMobile || !willHover || actualVariant === "disabled")
       return;
 
     const rect = buttonRef.current.getBoundingClientRect();
@@ -48,33 +48,41 @@ const Button: React.FC<ButtonProps> = ({
   };
 
   const handleMouseEnter = () => {
-    if (!isMobile) {
+    if (!isMobile && actualVariant !== "disabled") {
       setHasInteracted(true);
       setIsHovered(true);
     }
   };
 
   const handleMouseLeave = () => {
-    if (!isMobile) {
+    if (!isMobile && actualVariant !== "disabled") {
       setIsHovered(false);
       setMousePosition({ x: 0, y: 0 });
     }
   };
 
   const handleMouseDown = () => {
-    setIsPressed(true);
+    if (actualVariant !== "disabled") {
+      setIsPressed(true);
+    }
   };
 
   const handleMouseUp = () => {
-    setIsPressed(false);
+    if (actualVariant !== "disabled") {
+      setIsPressed(false);
+    }
   };
 
   const handleTouchStart = () => {
-    setIsPressed(true);
+    if (actualVariant !== "disabled") {
+      setIsPressed(true);
+    }
   };
 
   const handleTouchEnd = () => {
-    setIsPressed(false);
+    if (actualVariant !== "disabled") {
+      setIsPressed(false);
+    }
   };
 
   const baseStyles = "font-mono font-medium transition-all duration-200";
@@ -134,22 +142,28 @@ const Button: React.FC<ButtonProps> = ({
         )}
         style={{
           transform:
-            isPressed
-              ? "translate(4px, 4px)"
-              : isHovered && !isMobile && willHover
-                ? `translate(${mousePosition.x}px, ${mousePosition.y}px)`
-                : !willHover || isMobile
-                  ? "translate(-4px, -4px)"
-                  : "translate(0px, 0px)",
+            actualVariant === "disabled"
+              ? "translate(0px, 0px)"
+              : isPressed
+                ? "translate(4px, 4px)"
+                : isHovered && !isMobile && willHover
+                  ? `translate(${mousePosition.x}px, ${mousePosition.y}px)`
+                  : !willHover || isMobile
+                    ? "translate(-4px, -4px)"
+                    : "translate(0px, 0px)",
           transition:
-            isPressed || !isHovered || isMobile || !willHover
-              ? "transform 0.2s ease-out"
-              : "none",
-          boxShadow: isPressed
+            actualVariant === "disabled"
+              ? "none"
+              : isPressed || !isHovered || isMobile || !willHover
+                ? "transform 0.2s ease-out"
+                : "none",
+          boxShadow: actualVariant === "disabled"
             ? "none"
-            : !willHover || isMobile || (isHovered && !isMobile)
-              ? "4px 4px 0 0 #9ea393"
-              : "none",
+            : isPressed
+              ? "none"
+              : !willHover || isMobile || (isHovered && !isMobile)
+                ? "4px 4px 0 0 #9ea393"
+                : "none",
           position: "relative",
           zIndex: 2,
         }}

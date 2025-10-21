@@ -496,7 +496,14 @@ export const DepositInput = ({ poolData }: DepositInputProps) => {
 
       console.log("🆔 Transaction ID:", txId);
 
-      // Update deposit with tx hash
+      // Send BTC tx hash to backend
+      try {
+        await depositAPI.updateBtcTxHash(depositResult.deposit_id, txId);
+      } catch (error) {
+        console.error("Failed to update BTC tx hash:", error);
+      }
+
+      // Also update local store for immediate UI feedback
       updatePendingDeposit(depositResult.deposit_id, {
         depositTxHash: txId,
       });
@@ -688,10 +695,10 @@ export const DepositInput = ({ poolData }: DepositInputProps) => {
             }}
             disabled={
               !connected ||
-              (!isInitializing &&
-                !isSwapping &&
-                !currentDepositId &&
-                (!amountBtc || !selectedAsset))
+              (isSwapping ||
+                (!isInitializing &&
+                  !currentDepositId &&
+                  (!amountBtc || !selectedAsset)))
             }
           >
             {isSwapping
