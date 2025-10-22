@@ -290,9 +290,8 @@ export const DepositInput = ({ poolData }: DepositInputProps) => {
 
         const amountValue = Number(amountBtc);
 
-        // Validate amount range
-        const MIN_BTC = 0.00001; // ~$1
-        const MAX_BTC = 1.0; // ~$100k
+        const MIN_BTC = 0.00003;
+        const MAX_BTC = 0.0005;
 
         if (amountValue < MIN_BTC) {
           const errorMsg = `Please enter an amount between ${MIN_BTC} BTC and ${MAX_BTC} BTC`;
