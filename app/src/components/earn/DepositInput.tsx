@@ -17,6 +17,7 @@ import { ChainDataContext } from "@/app/context/ChainDataContext";
 import { useWallet } from "@/store/useWallet";
 import { depositAPI, assetAPI } from "@/lib/api";
 import { getTokenImageUrl } from "@/lib/earnUtils";
+import { useToast } from "@/components/ui/Toast";
 
 // Patch fetch for CORS
 if (typeof window !== "undefined") {
@@ -57,6 +58,7 @@ export const DepositInput = ({ poolData }: DepositInputProps) => {
   const chainData = useContext(ChainDataContext);
   const bitcoinChainData = chainData.BITCOIN;
   const starknetChainData = chainData.STARKNET;
+  const { addToast } = useToast();
 
   const {
     bitcoinPaymentAddress,
@@ -77,6 +79,7 @@ export const DepositInput = ({ poolData }: DepositInputProps) => {
   const [quote, setQuote] = useState<any>(null);
   const [quoteAmount, setQuoteAmount] = useState<number>(0);
   const [isGettingQuote, setIsGettingQuote] = useState(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
   const [btcPrice, setBtcPrice] = useState<number>(50000);
   const [currentDepositId, setCurrentDepositId] = useState<string | null>(null);
   const [depositStatus, setDepositStatus] = useState<string | null>(null);
@@ -283,7 +286,31 @@ export const DepositInput = ({ poolData }: DepositInputProps) => {
     const getQuote = async () => {
       try {
         setIsGettingQuote(true);
-        const amountInSats = BigInt(Math.floor(Number(amountBtc) * 1e8));
+        setQuoteError(null);
+
+        const amountValue = Number(amountBtc);
+
+        // Validate amount range
+        const MIN_BTC = 0.00001; // ~$1
+        const MAX_BTC = 1.0; // ~$100k
+
+        if (amountValue < MIN_BTC) {
+          const errorMsg = `Please enter an amount between ${MIN_BTC} BTC and ${MAX_BTC} BTC`;
+          setQuoteError(errorMsg);
+          addToast(errorMsg, 'warning', 7000);
+          setQuote(null);
+          return;
+        }
+
+        if (amountValue > MAX_BTC) {
+          const errorMsg = `Maximum amount is ${MAX_BTC} BTC per transaction`;
+          setQuoteError(errorMsg);
+          addToast(errorMsg, 'error', 7000);
+          setQuote(null);
+          return;
+        }
+
+        const amountInSats = BigInt(Math.floor(amountValue * 1e8));
 
         // Map asset symbol to Atomiq token
         let token;
@@ -311,6 +338,11 @@ export const DepositInput = ({ poolData }: DepositInputProps) => {
         );
       } catch (e: any) {
         console.error("Failed to get quote:", e?.message);
+        const errorMsg = e?.message?.includes('amount')
+          ? `Invalid amount. Please enter between 0.00003 BTC and 0.0005 BTC`
+          : e?.message || 'Failed to get quote. Please try again.';
+        setQuoteError(errorMsg);
+        addToast(errorMsg, 'error', 7000);
         setQuote(null);
       } finally {
         setIsGettingQuote(false);
@@ -526,9 +558,14 @@ export const DepositInput = ({ poolData }: DepositInputProps) => {
   };
 
   const calculateEquivalent = () => {
+    if (quoteError) return "Error";
     if (!quote || !selectedAsset || !amountBtc) return "0.00";
-    const output = Number(quote.getOutput().amount);
-    return output.toFixed(5);
+    try {
+      const output = Number(quote.getOutput().amount);
+      return output.toFixed(5);
+    } catch (error) {
+      return "Error";
+    }
   };
 
   const calculateFees = () => {
@@ -650,6 +687,18 @@ export const DepositInput = ({ poolData }: DepositInputProps) => {
               </svg>
             </button>
           </div>
+
+          {/* Quote Error Display */}
+          {quoteError && (
+            <div className="w-full mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div className="flex items-start gap-2">
+                <svg className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+                <p className="text-sm text-red-700 font-medium">{quoteError}</p>
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-start w-full text-xs xs:text-sm font-medium">
             <div className="flex items-center gap-1">
               <span className="font-normal">Fees: </span>
